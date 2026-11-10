@@ -216,7 +216,28 @@
     transition: transform .08s ease;
   }
   .vote small { font: 500 15px "DM Sans", system-ui, sans-serif; opacity: .9; }
-  .vote:active { transform: scale(.97); }
+  .vote {
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+  }
+  /* Hold-to-vote fill */
+  .vote::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background: rgba(255, 255, 255, .28);
+    transform: scaleX(0);
+    transform-origin: left;
+  }
+  .vote.holding { transform: scale(.97); }
+  .vote.holding::before { transform: scaleX(1); transition: transform var(--hold-ms, 600ms) linear; }
+  .vote.done::before { transform: scaleX(1); background: rgba(255, 255, 255, .45); }
   .vote.yes { background: var(--yes); }
   .vote.no { background: var(--no); }
   .fine { font-size: 13px; color: var(--muted); }
@@ -365,7 +386,7 @@
   <!-- Vote -->
   <section class="screen" id="s-vote" aria-labelledby="vote-h">
     <h2 id="vote-h">Do you want dessert?</h2>
-    <p class="lede">Be honest. Nobody will see your vote.</p>
+    <p class="lede">Be honest. Nobody will see your vote.<br><strong>Press and hold</strong> to lock it in.</p>
     <div class="vote-grid">
       <button class="vote yes" type="button" data-vote="yes">YES<small>Bring the menu</small></button>
       <button class="vote no" type="button" data-vote="no">NO<small>I'm good, thanks</small></button>
@@ -473,18 +494,43 @@
     show("s-vote");
   };
 
+  // Hold to vote: press and hold ~0.6s while the button fills. Letting go early cancels.
+  const HOLD_MS = 600;
+  document.documentElement.style.setProperty("--hold-ms", HOLD_MS + "ms");
   document.querySelectorAll(".vote").forEach((b) => {
-    b.onclick = () => {
+    let timer = null;
+    const cancel = () => { clearTimeout(timer); timer = null; b.classList.remove("holding"); };
+    b.addEventListener("pointerdown", (e) => {
+      if (!document.getElementById("s-vote").classList.contains("active") || !settled() || timer) return;
+      e.preventDefault();
+      try { b.setPointerCapture(e.pointerId); } catch {}
+      b.classList.add("holding");
+      timer = setTimeout(() => {
+        timer = null;
+        b.classList.remove("holding");
+        b.classList.add("done");
+        castVote(b.dataset.vote);
+        setTimeout(() => b.classList.remove("done"), 400);
+      }, HOLD_MS);
+    });
+    ["pointerup", "pointercancel", "pointerleave"].forEach((ev) => b.addEventListener(ev, cancel));
+    b.addEventListener("contextmenu", (e) => e.preventDefault());
+    // Keyboard / screen reader activation (no pointer) votes directly.
+    b.addEventListener("click", (e) => { if (e.detail === 0) castVote(b.dataset.vote); });
+  });
+
+  function castVote(choice) {
+    {
       if (!document.getElementById("s-vote").classList.contains("active") || !settled()) return;
-      votes.push(b.dataset.vote);
+      votes.push(choice);
       current = votes.length;
       armedAt = Date.now();
       tick();
       if (navigator.vibrate) navigator.vibrate(30);
       if (current >= people) show("s-allin"); else showPass();
       document.querySelectorAll(".locked-note").forEach((n) => n.classList.add("show"));
-    };
-  });
+    }
+  }
 
   function hideLocked() {
     document.querySelectorAll(".locked-note").forEach((n) => n.classList.remove("show"));

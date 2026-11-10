@@ -1,7 +1,7 @@
 // Dessert Vote service worker: lets the app open with no signal.
 // Page: try the network briefly (so updates arrive), fall back to the cached copy.
 // Everything else: serve from cache, refresh it in the background.
-const CACHE = "dessert-vote-v2";
+const CACHE = "dessert-vote-v3";
 const CORE = ["./", "index.html", "manifest.webmanifest", "icon-192.png", "icon-512.png", "apple-touch-icon.png"];
 
 self.addEventListener("install", (e) => {
