@@ -3,10 +3,17 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta name="theme-color" content="#3b1f2b">
+<meta name="theme-color" content="#fbf3ea" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1d1216" media="(prefers-color-scheme: dark)">
 <title>Dessert Vote</title>
 <meta name="description" content="Secret yes/no vote for dessert. More than half say yes, the table gets dessert.">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍰</text></svg>">
+<link rel="icon" href="icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Dessert Vote">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,800&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
@@ -214,7 +221,34 @@
   .vote.no { background: var(--no); }
   .fine { font-size: 13px; color: var(--muted); }
 
-  .lock { font-size: 64px; }
+  .locked-note {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--yes);
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 8px 8px 8px 16px;
+    align-self: center;
+    animation: in .35s ease both;
+  }
+  .locked-note.show { display: inline-flex; }
+  .link-btn {
+    border: none;
+    background: var(--bg);
+    color: var(--muted);
+    font: 500 14px "DM Sans", system-ui, sans-serif;
+    padding: 6px 12px;
+    border-radius: 999px;
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
 
   /* Reveal */
   .drum {
@@ -331,9 +365,10 @@
 
   <!-- Pass the phone -->
   <section class="screen" id="s-pass" aria-labelledby="pass-h">
+    <div class="locked-note" role="status"><span>🔒 Vote locked in</span><button class="link-btn undo" type="button">Oops, change my vote</button></div>
     <div class="progress" id="progress" aria-hidden="true"></div>
     <div class="emoji-hero" aria-hidden="true">🙈</div>
-    <h2 id="pass-h">Voter <span id="voterNum">1</span> of <span id="voterTotal">4</span></h2>
+    <h2 id="pass-h">Pass to voter <span id="voterNum">1</span> of <span id="voterTotal">4</span></h2>
     <p class="lede">Grab the phone. Everyone else, look away.</p>
     <button class="btn" type="button" id="readyBtn">I'm ready to vote</button>
   </section>
@@ -349,16 +384,9 @@
     <p class="fine">“Only if someone else does” isn't an option.</p>
   </section>
 
-  <!-- Locked -->
-  <section class="screen" id="s-locked" aria-labelledby="locked-h">
-    <div class="lock" aria-hidden="true">🔒</div>
-    <h2 id="locked-h">Vote locked in</h2>
-    <p class="lede" id="lockedMsg">Pass the phone to the next person.</p>
-    <button class="btn" type="button" id="nextBtn">Next voter</button>
-  </section>
-
   <!-- All in -->
   <section class="screen" id="s-allin" aria-labelledby="allin-h">
+    <div class="locked-note" role="status"><span>🔒 Vote locked in</span><button class="link-btn undo" type="button">Oops, change my vote</button></div>
     <div class="emoji-hero" aria-hidden="true">🥁</div>
     <h2 id="allin-h">All votes are in</h2>
     <p class="lede">Put the phone in the middle of the table.</p>
@@ -403,9 +431,12 @@
 
   let people = Math.min(MAX, Math.max(MIN, Number(store.get("dv-people", 4)) || 4));
   let soundOn = store.get("dv-sound", true) !== false;
-  let current = 0;
+  let votes = [];          // "yes" / "no", in order; never shown individually
+  let current = 0;         // index of the next voter
   let yes = 0;
   let no = 0;
+  let armedAt = 0;         // ignore taps right after a vote (stops a double tap skipping ahead)
+  let undoTimer = null;
 
   const needed = (n) => Math.floor(n / 2) + 1;
 
@@ -427,7 +458,9 @@
   $("startBtn").onclick = () => { unlockAudio(); startRound(); };
 
   function startRound() {
-    current = 0; yes = 0; no = 0;
+    votes = []; current = 0; yes = 0; no = 0;
+    hideUndo();
+    keepAwake(true);
     showPass();
   }
 
@@ -444,28 +477,56 @@
     }
     show("s-pass");
   }
-  $("readyBtn").onclick = () => show("s-vote");
+  const settled = () => Date.now() - armedAt > 600;
 
-  let voting = false;
+  $("readyBtn").onclick = () => {
+    if (!settled()) return;
+    hideUndo(); // the next person can't undo the previous person's vote
+    show("s-vote");
+  };
+
   document.querySelectorAll(".vote").forEach((b) => {
     b.onclick = () => {
-      if (voting) return; // guard against double taps
-      voting = true;
-      if (b.dataset.vote === "yes") yes++; else no++;
-      current++;
+      if (!document.getElementById("s-vote").classList.contains("active") || !settled()) return;
+      votes.push(b.dataset.vote);
+      current = votes.length;
+      armedAt = Date.now();
       tick();
       if (navigator.vibrate) navigator.vibrate(30);
-      const last = current >= people;
-      $("lockedMsg").textContent = last ? "That was the last vote." : "Pass the phone to the next person.";
-      $("nextBtn").textContent = last ? "Continue" : "Next voter";
-      show("s-locked");
-      setTimeout(() => { voting = false; }, 400);
+      if (current >= people) show("s-allin"); else showPass();
+      showUndo();
     };
   });
-  $("nextBtn").onclick = () => current >= people ? show("s-allin") : showPass();
+
+  // Undo: drop the last vote and let the same person vote again. Never reveals what it was.
+  function showUndo() {
+    document.querySelectorAll(".locked-note").forEach((n) => n.classList.add("show"));
+    clearTimeout(undoTimer);
+    undoTimer = setTimeout(hideUndo, 15000);
+  }
+  function hideUndo() {
+    clearTimeout(undoTimer);
+    document.querySelectorAll(".locked-note").forEach((n) => n.classList.remove("show"));
+  }
+  document.querySelectorAll(".undo").forEach((u) => {
+    u.onclick = () => {
+      if (!votes.length) return;
+      votes.pop();
+      current = votes.length;
+      hideUndo();
+      show("s-vote");
+    };
+  });
 
   // ---------- Reveal ----------
-  $("revealBtn").onclick = () => { unlockAudio(); runDrumroll(); };
+  $("revealBtn").onclick = () => {
+    if (!settled()) return;
+    hideUndo();
+    yes = votes.filter((v) => v === "yes").length;
+    no = votes.length - yes;
+    unlockAudio();
+    runDrumroll();
+  };
 
   function runDrumroll() {
     show("s-drum");
@@ -488,6 +549,7 @@
   }
 
   function showResult() {
+    keepAwake(false);
     const win = yes >= needed(people);
     const v = $("verdict");
     v.textContent = win ? "DESSERT!" : "No dessert.";
@@ -510,7 +572,26 @@
   }
 
   $("againBtn").onclick = startRound;
-  $("newBtn").onclick = () => { renderCount(); show("s-setup"); };
+  $("newBtn").onclick = () => { keepAwake(false); renderCount(); show("s-setup"); };
+
+  // ---------- Keep the screen on while the phone goes around ----------
+  let wakeLock = null, wantAwake = false;
+  async function keepAwake(on) {
+    wantAwake = on;
+    try {
+      if (on && !wakeLock && "wakeLock" in navigator) {
+        wakeLock = await navigator.wakeLock.request("screen");
+        wakeLock.addEventListener("release", () => { wakeLock = null; });
+      } else if (!on && wakeLock) {
+        await wakeLock.release();
+        wakeLock = null;
+      }
+    } catch { wakeLock = null; }
+  }
+  // The browser drops the lock when the tab is hidden; take it back when it returns.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && wantAwake) keepAwake(true);
+  });
 
   const pick = (a) => a[Math.floor(Math.random() * a.length)];
 
@@ -654,6 +735,11 @@
 
   renderCount();
   renderSoundBtn();
+
+  // ---------- Offline support ----------
+  if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+  }
 })();
 </script>
 </body>
