@@ -233,22 +233,11 @@
     background: var(--card);
     border: 1px solid var(--line);
     border-radius: 999px;
-    padding: 8px 8px 8px 16px;
+    padding: 8px 16px;
     align-self: center;
     animation: in .35s ease both;
   }
   .locked-note.show { display: inline-flex; }
-  .link-btn {
-    border: none;
-    background: var(--bg);
-    color: var(--muted);
-    font: 500 14px "DM Sans", system-ui, sans-serif;
-    padding: 6px 12px;
-    border-radius: 999px;
-    cursor: pointer;
-    text-decoration: underline;
-    text-underline-offset: 2px;
-  }
 
   /* Reveal */
   .drum {
@@ -365,7 +354,7 @@
 
   <!-- Pass the phone -->
   <section class="screen" id="s-pass" aria-labelledby="pass-h">
-    <div class="locked-note" role="status"><span>🔒 Vote locked in</span><button class="link-btn undo" type="button">Oops, change my vote</button></div>
+    <div class="locked-note" role="status">🔒 Vote locked in</div>
     <div class="progress" id="progress" aria-hidden="true"></div>
     <div class="emoji-hero" aria-hidden="true">🙈</div>
     <h2 id="pass-h">Pass to voter <span id="voterNum">1</span> of <span id="voterTotal">4</span></h2>
@@ -386,7 +375,7 @@
 
   <!-- All in -->
   <section class="screen" id="s-allin" aria-labelledby="allin-h">
-    <div class="locked-note" role="status"><span>🔒 Vote locked in</span><button class="link-btn undo" type="button">Oops, change my vote</button></div>
+    <div class="locked-note" role="status">🔒 Vote locked in</div>
     <div class="emoji-hero" aria-hidden="true">🥁</div>
     <h2 id="allin-h">All votes are in</h2>
     <p class="lede">Put the phone in the middle of the table.</p>
@@ -436,7 +425,6 @@
   let yes = 0;
   let no = 0;
   let armedAt = 0;         // ignore taps right after a vote (stops a double tap skipping ahead)
-  let undoTimer = null;
 
   const needed = (n) => Math.floor(n / 2) + 1;
 
@@ -459,7 +447,7 @@
 
   function startRound() {
     votes = []; current = 0; yes = 0; no = 0;
-    hideUndo();
+    hideLocked();
     keepAwake(true);
     showPass();
   }
@@ -481,7 +469,7 @@
 
   $("readyBtn").onclick = () => {
     if (!settled()) return;
-    hideUndo(); // the next person can't undo the previous person's vote
+    hideLocked();
     show("s-vote");
   };
 
@@ -494,34 +482,18 @@
       tick();
       if (navigator.vibrate) navigator.vibrate(30);
       if (current >= people) show("s-allin"); else showPass();
-      showUndo();
+      document.querySelectorAll(".locked-note").forEach((n) => n.classList.add("show"));
     };
   });
 
-  // Undo: drop the last vote and let the same person vote again. Never reveals what it was.
-  function showUndo() {
-    document.querySelectorAll(".locked-note").forEach((n) => n.classList.add("show"));
-    clearTimeout(undoTimer);
-    undoTimer = setTimeout(hideUndo, 15000);
-  }
-  function hideUndo() {
-    clearTimeout(undoTimer);
+  function hideLocked() {
     document.querySelectorAll(".locked-note").forEach((n) => n.classList.remove("show"));
   }
-  document.querySelectorAll(".undo").forEach((u) => {
-    u.onclick = () => {
-      if (!votes.length) return;
-      votes.pop();
-      current = votes.length;
-      hideUndo();
-      show("s-vote");
-    };
-  });
 
   // ---------- Reveal ----------
   $("revealBtn").onclick = () => {
     if (!settled()) return;
-    hideUndo();
+    hideLocked();
     yes = votes.filter((v) => v === "yes").length;
     no = votes.length - yes;
     unlockAudio();
